@@ -1,6 +1,6 @@
 import torch
 import copy
-from typing import List, Tuple, Callable, Any
+from typing import Dict, Tuple, Callable
 
 
 def adapt_model(
@@ -9,8 +9,8 @@ def adapt_model(
     loss_fn: Callable,
     inner_lr: float,
     inner_steps: int
-) -> torch.nn.Module:
-    """Adapt model to a specific task using support data.
+) -> Dict[str, torch.Tensor]:
+    """Adapt model to a specific task using standard SGD (Reptile approach).
     
     Args:
         model: The model to adapt
@@ -20,20 +20,31 @@ def adapt_model(
         inner_steps: Number of gradient steps for adaptation
         
     Returns:
-        Adapted model
+        Dictionary of adapted parameters
     """
     # Clone model for task-specific adaptation
     adapted_model = copy.deepcopy(model)
+    
+    # Device consistency check
+    device = next(model.parameters()).device
+    support_data = tuple(tensor.to(device) if hasattr(tensor, 'to') else tensor for tensor in support_data)
+    
     optimizer = torch.optim.SGD(adapted_model.parameters(), lr=inner_lr)
     
     # Standard SGD training for Reptile
     for _ in range(inner_steps):
         optimizer.zero_grad()
         loss = loss_fn(adapted_model, *support_data)
+        
+        # Check for NaN/Inf in loss
+        if not torch.isfinite(loss):
+            raise ValueError(f"Non-finite loss detected: {loss.item()}")
+            
         loss.backward()
         optimizer.step()
     
-    return adapted_model
+    # Return adapted parameters as dictionary
+    return dict(adapted_model.named_parameters())
 
 
 def meta_update_step(
@@ -59,35 +70,34 @@ def meta_update_step(
     Returns:
         Average meta loss across the batch
     """
-    mu, y0, dt, y1, y0_example, dt_example, y1_example = batch
-    
-    batch_size = y0.shape[0]
     meta_losses = []
-    adapted_models = []
+    adapted_params_list = []
     
     # Adapt to each task and collect adapted parameters
-    for i in range(batch_size):
-        support_data = (y0_example[i], dt_example[i], y1_example[i])
-        query_data = (y0[i], dt[i], y1[i])
-        
+    for support_data, query_data in task_batch:
         # Adapt to current task
-        adapted_model = adapt_model(model, support_data, loss_fn, inner_lr, inner_steps)
-        adapted_models.append(adapted_model)
+        adapted_params = adapt_model(model, support_data, loss_fn, inner_lr, inner_steps)
+        adapted_params_list.append(adapted_params)
         
-        # Compute meta loss on query set for monitoring
-        meta_loss = loss_fn(adapted_model, *query_data)
+        # Compute meta loss on query set for monitoring (using original model)
+        meta_loss = loss_fn(model, *query_data)
         meta_losses.append(meta_loss)
     
     # Reptile update: move towards average of adapted parameters
     with torch.no_grad():
-        for i, param in enumerate(model.parameters()):
-            # Average the i-th parameter across all adapted models
-            adapted_params = [list(adapted_model.parameters())[i] for adapted_model in adapted_models]
-            avg_adapted_param = torch.stack(adapted_params).mean(dim=0)
+        for name, param in model.named_parameters():
+            # Average the parameter across all adapted models
+            adapted_param_values = [adapted_params[name] for adapted_params in adapted_params_list]
+            avg_adapted_param = torch.stack(adapted_param_values).mean(dim=0)
             
             # Reptile update: interpolate between original and average adapted
             param.data = param.data + meta_lr * (avg_adapted_param - param.data)
     
     # Return average meta loss for monitoring
     avg_meta_loss = torch.stack(meta_losses).mean()
+    
+    # Check for NaN/Inf in meta loss
+    if not torch.isfinite(avg_meta_loss):
+        raise ValueError(f"Non-finite meta loss detected: {avg_meta_loss.item()}")
+        
     return avg_meta_loss.item()
