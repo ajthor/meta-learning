@@ -1,7 +1,9 @@
 import torch
 from torch.utils.data import IterableDataset
 
-from function_encoder.model.neural_ode import rk4_step
+import sys
+sys.path.append('/workspaces/meta-learning')
+from meta_learning.model.neural_ode import rk4_step
 
 
 def van_der_pol(t, x, mu=1.0):
