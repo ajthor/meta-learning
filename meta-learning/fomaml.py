@@ -3,18 +3,6 @@ import copy
 from typing import List, Tuple, Callable, Any
 
 
-def clone_model(model: torch.nn.Module) -> torch.nn.Module:
-    """Create a deep copy of model parameters.
-    
-    Args:
-        model: The model to clone
-        
-    Returns:
-        A deep copy of the model
-    """
-    return copy.deepcopy(model)
-
-
 def adapt_model(
     model: torch.nn.Module,
     support_data: Tuple[torch.Tensor, ...],
@@ -34,7 +22,8 @@ def adapt_model(
     Returns:
         Adapted model
     """
-    adapted_model = clone_model(model)
+    # Clone model for task-specific adaptation
+    adapted_model = copy.deepcopy(model)
     
     for _ in range(inner_steps):
         loss = loss_fn(adapted_model, *support_data)
@@ -55,29 +44,10 @@ def adapt_model(
     return adapted_model
 
 
-def compute_meta_loss(
-    model: torch.nn.Module,
-    query_data: Tuple[torch.Tensor, ...],
-    loss_fn: Callable
-) -> torch.Tensor:
-    """Compute loss on query data after adaptation.
-    
-    Args:
-        model: The adapted model
-        query_data: Tuple of (inputs, targets, ...) for evaluation
-        loss_fn: Loss function for the task
-        
-    Returns:
-        Loss tensor
-    """
-    return loss_fn(model, *query_data)
-
-
 def meta_update_step(
     model: torch.nn.Module,
-    task_batch: List[Tuple],
+    batch: Tuple[torch.Tensor, ...],
     inner_lr: float,
-    meta_lr: float,
     inner_steps: int,
     loss_fn: Callable,
     meta_optimizer: torch.optim.Optimizer
@@ -86,9 +56,8 @@ def meta_update_step(
     
     Args:
         model: The meta-model to update
-        task_batch: List of tasks, each task is (support_data, query_data)
+        batch: Batch from DataLoader (mu, y0, dt, y1, y0_example, dt_example, y1_example)
         inner_lr: Learning rate for inner loop adaptation
-        meta_lr: Learning rate for meta updates (unused, handled by optimizer)
         inner_steps: Number of inner loop steps
         loss_fn: Loss function for tasks
         meta_optimizer: Optimizer for meta-parameters
@@ -97,14 +66,21 @@ def meta_update_step(
         Average meta loss across the batch
     """
     meta_optimizer.zero_grad()
+    mu, y0, dt, y1, y0_example, dt_example, y1_example = batch
+    
+    batch_size = y0.shape[0]
     meta_losses = []
     
-    for support_data, query_data in task_batch:
+    # Process each task in the batch
+    for i in range(batch_size):
+        support_data = (y0_example[i], dt_example[i], y1_example[i])
+        query_data = (y0[i], dt[i], y1[i])
+        
         # Adapt to current task
         adapted_model = adapt_model(model, support_data, loss_fn, inner_lr, inner_steps)
         
         # Compute meta loss on query set
-        meta_loss = compute_meta_loss(adapted_model, query_data, loss_fn)
+        meta_loss = loss_fn(adapted_model, *query_data)
         meta_losses.append(meta_loss)
     
     # Average meta loss across tasks
