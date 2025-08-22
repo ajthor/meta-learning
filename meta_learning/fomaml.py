@@ -6,17 +6,17 @@ from .adapted_model import AdaptedParameterModel
 
 def adapt_model(
     model: torch.nn.Module,
-    support_data: Tuple[torch.Tensor, ...],
+    example_data: Tuple[torch.Tensor, ...],
     loss_fn: Callable,
     inner_lr: float,
     inner_steps: int
 ) -> AdaptedParameterModel:
-    """Adapt model to a specific task using support data (first-order only).
+    """Adapt model to a specific task using example data (first-order only).
     
     Args:
         model: The model to adapt
-        support_data: Tuple of (inputs, targets, ...) for adaptation
-        loss_fn: Loss function that takes (model, *support_data) -> loss
+        example_data: Tuple of (inputs, targets, ...) for adaptation
+        loss_fn: Loss function that takes (model, data) -> loss
         inner_lr: Learning rate for inner loop adaptation
         inner_steps: Number of gradient steps for adaptation
         
@@ -31,7 +31,7 @@ def adapt_model(
         adapted_model = AdaptedParameterModel(model, params)
         
         # Compute loss using adapted model
-        loss = loss_fn(adapted_model, *support_data)
+        loss = loss_fn(adapted_model, example_data)
         
         # Check for NaN/Inf in loss
         if not torch.isfinite(loss):
@@ -57,7 +57,8 @@ def adapt_model(
 
 def meta_update_step(
     model: torch.nn.Module,
-    task_batch: list,
+    query_data: Tuple[torch.Tensor, ...],
+    example_data: Tuple[torch.Tensor, ...],
     inner_lr: float,
     inner_steps: int,
     loss_fn: Callable,
@@ -67,22 +68,30 @@ def meta_update_step(
     
     Args:
         model: The meta-model to update
-        task_batch: List of (support_data, query_data) tuples for each task
+        query_data: Batch of query data for meta-loss computation
+        example_data: Batch of example data for adaptation
         inner_lr: Learning rate for inner loop adaptation
         inner_steps: Number of inner loop steps
-        loss_fn: Loss function that takes (model, *data) -> loss
+        loss_fn: Loss function that takes (model, data) -> loss
         meta_optimizer: Optimizer for meta-parameters
         
     Returns:
         Average meta loss across the batch
     """
     meta_optimizer.zero_grad()
+    
+    # Get batch size from first tensor
+    batch_size = query_data[0].shape[0]
     meta_losses = []
     
     # Process each task in the batch
-    for support_data, query_data in task_batch:
+    for i in range(batch_size):
+        # Extract single task data
+        task_example_data = tuple(tensor[i] for tensor in example_data)
+        task_query_data = tuple(tensor[i] for tensor in query_data)
+        
         # Adapt to current task
-        adapted_model = adapt_model(model, support_data, loss_fn, inner_lr, inner_steps)
+        adapted_model = adapt_model(model, task_example_data, loss_fn, inner_lr, inner_steps)
         
         # Detach adapted parameters to ensure first-order approximation
         detached_params = OrderedDict({
@@ -92,7 +101,7 @@ def meta_update_step(
         detached_adapted_model = AdaptedParameterModel(model, detached_params)
         
         # Compute meta loss on query set using detached adapted model
-        meta_loss = loss_fn(detached_adapted_model, *query_data)
+        meta_loss = loss_fn(detached_adapted_model, task_query_data)
         meta_losses.append(meta_loss)
     
     # Average meta loss across tasks

@@ -1,12 +1,11 @@
 import torch
-import torch.nn as nn
 import matplotlib.pyplot as plt
 from torch.utils.data import DataLoader
 
 from meta_learning.maml import adapt_model, meta_update_step
 from meta_learning.model.neural_ode import NeuralODE, ODEFunc, rk4_step
 from meta_learning.model.mlp import MLP
-from examples.datasets.van_der_pol import VanDerPolDataset
+from datasets.van_der_pol import VanDerPolDataset
 
 import tqdm
 
@@ -94,15 +93,16 @@ with tqdm.trange(num_steps) as tqdm_bar:
 
 
 # Evaluate adaptation
-
+print("\nEvaluating adaptation performance...")
 adaptation_losses = []
 
-dataloader = DataLoader(dataset, batch_size=1)
-dataloader_iter = iter(dataloader)
+# Create new dataloader for evaluation with batch size 1
+eval_dataloader = DataLoader(dataset, batch_size=1)
+eval_dataloader_iter = iter(eval_dataloader)
 
 for i in range(10):
-    batch = next(dataloader_iter)
-    _, y0, dt, y1, y0_example, dt_example, y1_example = batch
+    batch = next(eval_dataloader_iter)
+    mu, y0, dt, y1, y0_example, dt_example, y1_example = batch
 
     query_data = (y0, dt, y1)
     example_data = (y0_example, dt_example, y1_example)
@@ -110,7 +110,6 @@ for i in range(10):
     # Test adaptation
     adapted_model = adapt_model(
         model=model,
-        query_data=query_data,
         example_data=example_data,
         loss_fn=loss_fn,
         inner_lr=inner_lr,
@@ -118,8 +117,12 @@ for i in range(10):
     )
 
     # Compute test loss using adapted model
-    test_loss = loss_fn(adapted_model, *query_data).item()
+    test_loss = loss_fn(adapted_model, query_data).item()
     adaptation_losses.append(test_loss)
+
+    print(f"Task {i+1} (μ={mu[0].item():.2f}): Adaptation loss = {test_loss:.6f}")
+
+print(f"Average adaptation loss: {torch.tensor(adaptation_losses).mean():.6f}")
 
 # Plot results
 

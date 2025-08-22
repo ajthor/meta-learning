@@ -1,40 +1,36 @@
 import torch
 import copy
-from typing import Dict, Tuple, Callable
+from typing import Tuple, Callable
+from collections import OrderedDict
 
 
 def adapt_model(
     model: torch.nn.Module,
-    support_data: Tuple[torch.Tensor, ...],
+    example_data: Tuple[torch.Tensor, ...],
     loss_fn: Callable,
     inner_lr: float,
     inner_steps: int
-) -> Dict[str, torch.Tensor]:
+) -> OrderedDict[str, torch.Tensor]:
     """Adapt model to a specific task using standard SGD (Reptile approach).
     
     Args:
         model: The model to adapt
-        support_data: Tuple of (inputs, targets, ...) for adaptation
-        loss_fn: Loss function for the task
+        example_data: Tuple of (inputs, targets, ...) for adaptation
+        loss_fn: Loss function that takes (model, data) -> loss
         inner_lr: Learning rate for inner loop adaptation
         inner_steps: Number of gradient steps for adaptation
         
     Returns:
-        Dictionary of adapted parameters
+        OrderedDict of adapted parameters
     """
     # Clone model for task-specific adaptation
     adapted_model = copy.deepcopy(model)
-    
-    # Device consistency check
-    device = next(model.parameters()).device
-    support_data = tuple(tensor.to(device) if hasattr(tensor, 'to') else tensor for tensor in support_data)
-    
     optimizer = torch.optim.SGD(adapted_model.parameters(), lr=inner_lr)
     
     # Standard SGD training for Reptile
     for _ in range(inner_steps):
         optimizer.zero_grad()
-        loss = loss_fn(adapted_model, *support_data)
+        loss = loss_fn(adapted_model, example_data)
         
         # Check for NaN/Inf in loss
         if not torch.isfinite(loss):
@@ -43,13 +39,14 @@ def adapt_model(
         loss.backward()
         optimizer.step()
     
-    # Return adapted parameters as dictionary
-    return dict(adapted_model.named_parameters())
+    # Return adapted parameters as OrderedDict
+    return OrderedDict(adapted_model.named_parameters())
 
 
 def meta_update_step(
     model: torch.nn.Module,
-    batch: Tuple[torch.Tensor, ...],
+    query_data: Tuple[torch.Tensor, ...],
+    example_data: Tuple[torch.Tensor, ...],
     inner_lr: float,
     meta_lr: float,
     inner_steps: int,
@@ -60,27 +57,34 @@ def meta_update_step(
     
     Args:
         model: The meta-model to update
-        batch: Batch from DataLoader (mu, y0, dt, y1, y0_example, dt_example, y1_example)
+        query_data: Batch of query data for meta-loss computation
+        example_data: Batch of example data for adaptation
         inner_lr: Learning rate for inner loop adaptation
         meta_lr: Learning rate for meta updates (Reptile step size)
         inner_steps: Number of inner loop steps
-        loss_fn: Loss function for tasks
+        loss_fn: Loss function that takes (model, data) -> loss
         meta_optimizer: Optimizer for meta-parameters (unused in Reptile)
         
     Returns:
         Average meta loss across the batch
     """
+    # Get batch size from first tensor
+    batch_size = query_data[0].shape[0]
     meta_losses = []
     adapted_params_list = []
     
     # Adapt to each task and collect adapted parameters
-    for support_data, query_data in task_batch:
+    for i in range(batch_size):
+        # Extract single task data
+        task_example_data = tuple(tensor[i] for tensor in example_data)
+        task_query_data = tuple(tensor[i] for tensor in query_data)
+        
         # Adapt to current task
-        adapted_params = adapt_model(model, support_data, loss_fn, inner_lr, inner_steps)
+        adapted_params = adapt_model(model, task_example_data, loss_fn, inner_lr, inner_steps)
         adapted_params_list.append(adapted_params)
         
         # Compute meta loss on query set for monitoring (using original model)
-        meta_loss = loss_fn(model, *query_data)
+        meta_loss = loss_fn(model, task_query_data)
         meta_losses.append(meta_loss)
     
     # Reptile update: move towards average of adapted parameters

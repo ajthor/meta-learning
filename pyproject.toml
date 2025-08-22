@@ -1,0 +1,15 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "meta_learning"
+version = "0.1.0"
+description = "Canonical implementations of MAML, FO-MAML, and Reptile meta-learning algorithms"
+requires-python = ">=3.8"
+dependencies = [
+    "torch>=2.0.0",
+    "matplotlib>=3.5.0",
+    "numpy>=1.21.0",
+    "tqdm>=4.62.0"
+]
