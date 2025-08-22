@@ -2,7 +2,7 @@ import torch
 import matplotlib.pyplot as plt
 from torch.utils.data import DataLoader
 
-from meta_learning.fomaml import adapt_model, meta_update_step
+from meta_learning.maml import adapt_model, meta_update_step
 from meta_learning.model.neural_ode import NeuralODE, ODEFunc, rk4_step
 from meta_learning.model.mlp import MLP
 from datasets.van_der_pol import VanDerPolDataset, van_der_pol
@@ -67,32 +67,32 @@ meta_optimizer = torch.optim.Adam(model.parameters(), lr=meta_lr)
 # Train the model
 meta_losses = []
 
-# with tqdm.trange(num_steps) as tqdm_bar:
-#     for step in tqdm_bar:
-#         # Get batch of tasks
-#         batch = next(dataloader_iter)
-#         _, y0, dt, y1, y0_example, dt_example, y1_example = batch
+with tqdm.trange(num_steps) as tqdm_bar:
+    for step in tqdm_bar:
+        # Get batch of tasks
+        batch = next(dataloader_iter)
+        _, y0, dt, y1, y0_example, dt_example, y1_example = batch
 
-#         query_data = (y0, dt, y1)
-#         example_data = (y0_example, dt_example, y1_example)
+        query_data = (y0, dt, y1)
+        example_data = (y0_example, dt_example, y1_example)
 
-#         # Meta update step
-#         meta_loss = meta_update_step(
-#             model=model,
-#             query_data=query_data,
-#             example_data=example_data,
-#             inner_lr=inner_lr,
-#             inner_steps=inner_steps,
-#             loss_fn=loss_fn,
-#             meta_optimizer=meta_optimizer,
-#         )
-#         meta_losses.append(meta_loss)
+        # Meta update step
+        meta_loss = meta_update_step(
+            model=model,
+            query_data=query_data,
+            example_data=example_data,
+            inner_lr=inner_lr,
+            inner_steps=inner_steps,
+            loss_fn=loss_fn,
+            meta_optimizer=meta_optimizer,
+        )
+        meta_losses.append(meta_loss)
 
-#         tqdm_bar.set_postfix_str(f"loss: {meta_loss:.2e}")
+        tqdm_bar.set_postfix_str(f"loss: {meta_loss:.2e}")
 
 
-# # Save model
-# torch.save(model.state_dict(), "van_der_pol_model.pth")
+# Save model
+torch.save(model.state_dict(), "van_der_pol_model.pth")
 
 # Load model
 model = NeuralODE(
@@ -105,45 +105,32 @@ model.eval()
 
 # Get a random batch of 9 tasks for evaluation
 eval_dataloader = DataLoader(dataset, batch_size=9)
-eval_batch = next(iter(eval_dataloader))
-(
-    mu_batch,
-    y0_batch,
-    dt_batch,
-    y1_batch,
-    y0_example_batch,
-    dt_example_batch,
-    y1_example_batch,
-) = eval_batch
+batch = next(iter(eval_dataloader))
+mu, y0, dt, y1, y0_example, dt_example, y1_example = batch
 
 # Move to device
-mu_batch = mu_batch.to(device)
-y0_batch = y0_batch.to(device)
-dt_batch = dt_batch.to(device)
-y1_batch = y1_batch.to(device)
-y0_example_batch = y0_example_batch.to(device)
-dt_example_batch = dt_example_batch.to(device)
-y1_example_batch = y1_example_batch.to(device)
+mu = mu.to(device)
+y0 = y0.to(device)
+dt = dt.to(device)
+y1 = y1.to(device)
+y0_example = y0_example.to(device)
+dt_example = dt_example.to(device)
+y1_example = y1_example.to(device)
 
 # Match function-encoder repo parameters
 s = 0.1  # time step
 n = int(10 / s)  # number of steps = 100
-dt_rollout = torch.tensor([s]).to(device)
+_dt = torch.tensor([s]).to(device)
 
 fig, axes = plt.subplots(3, 3, figsize=(10, 10))
 axes = axes.flatten()
 
 for idx in range(9):
-    test_mu = mu_batch[idx].item()
-    y0_test = y0_batch[idx, 0:1]  # Use first query point as initial condition for rollout
-    y0_examples = y0_example_batch[idx]  # Example data for adaptation
-    dt_examples = dt_example_batch[idx]
-    y1_examples = y1_example_batch[idx]
-
-    print(f"\nTask {idx+1}: μ = {test_mu:.2f}")
+    _mu = mu[idx].item()
+    _y0 = torch.empty(1, 2, device=device).uniform_(*dataloader.dataset.y0_range)
 
     # Adapt model to this specific task
-    example_data = (y0_examples, dt_examples, y1_examples)
+    example_data = (y0_example[idx], dt_example[idx], y1_example[idx])
     adapted_model = adapt_model(
         model=model,
         example_data=example_data,
@@ -153,21 +140,21 @@ for idx in range(9):
     )
 
     # Generate true trajectory rollout (matching function-encoder repo exactly)
-    x = y0_test.clone()
-    y = [x.squeeze(0)]  # Remove batch dimension for list
+    x = _y0.clone()
+    y = [x]  # Remove batch dimension for list
     for k in range(n):
-        x = rk4_step(van_der_pol, x, dt_rollout, mu=test_mu) + x
-        y.append(x.squeeze(0))  # Remove batch dimension for list
+        x = rk4_step(van_der_pol, x, _dt, mu=_mu) + x
+        y.append(x)  # Remove batch dimension for list
     true_trajectory = torch.stack(y, dim=0)  # Use stack instead of cat
 
     # Generate predicted trajectory rollout
-    x = y0_test.clone()
-    pred = [x.squeeze(0)]  # Remove batch dimension for list
+    x = _y0.clone()
+    pred = [x]  # Remove batch dimension for list
     for k in range(n):
         with torch.no_grad():
-            x_next = adapted_model((x, dt_rollout))
+            x_next = adapted_model((x, _dt))
             x = x_next + x
-            pred.append(x.squeeze(0))  # Remove batch dimension for list
+            pred.append(x)  # Remove batch dimension for list
     pred_trajectory = torch.stack(pred, dim=0)  # Use stack instead of cat
 
     # Plot phase portrait
@@ -183,7 +170,6 @@ for idx in range(9):
 
     ax.set_xlim(-5, 5)
     ax.set_ylim(-5, 5)
-    ax.set_title(f"μ = {test_mu:.2f}")
 
     # Compute trajectory error
     traj_error = torch.mean((true_trajectory - pred_trajectory) ** 2).item()
@@ -202,11 +188,4 @@ fig.legend(
 
 plt.tight_layout()
 plt.subplots_adjust(top=0.9)  # Make room for legend
-plt.savefig(
-    "/workspaces/maml-meta-learning/adaptation_trajectories.png",
-    dpi=150,
-    bbox_inches="tight",
-)
 plt.show()
-
-# print(f"Training completed. Final meta loss: {meta_losses[-1]:.6f}")
