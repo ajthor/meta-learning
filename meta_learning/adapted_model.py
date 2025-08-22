@@ -18,6 +18,7 @@ class AdaptedParameterModel(torch.nn.Module):
             base_model: The original model architecture
             adapted_params: OrderedDict of adapted parameter tensors
         """
+        super(AdaptedParameterModel, self).__init__()
         self.base_model = base_model
         self.adapted_params = adapted_params
 

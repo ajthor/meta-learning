@@ -65,7 +65,6 @@ meta_optimizer = torch.optim.Adam(model.parameters(), lr=meta_lr)
 
 
 # Train the model
-print("Starting meta-learning training...")
 meta_losses = []
 
 with tqdm.trange(num_steps) as tqdm_bar:
@@ -85,7 +84,8 @@ with tqdm.trange(num_steps) as tqdm_bar:
             inner_lr=inner_lr,
             inner_steps=inner_steps,
             loss_fn=loss_fn,
-            meta_optimizer=meta_optimizer,
+            # meta_optimizer=meta_optimizer,
+            meta_lr=meta_lr,
         )
         meta_losses.append(meta_loss)
 
@@ -93,7 +93,6 @@ with tqdm.trange(num_steps) as tqdm_bar:
 
 
 # Evaluate adaptation
-print("\nEvaluating adaptation performance...")
 adaptation_losses = []
 
 # Create new dataloader for evaluation with batch size 1
@@ -127,11 +126,12 @@ print(f"Average adaptation loss: {torch.tensor(adaptation_losses).mean():.6f}")
 # Plot results
 
 plt.figure(figsize=(10, 6))
+
 plt.plot(meta_losses)
-plt.title("Meta-Learning Training - Meta Loss")
+
 plt.xlabel("Training Step")
 plt.ylabel("Meta Loss")
 plt.yscale("log")
 plt.grid(True)
-plt.savefig("/workspaces/maml-meta-learning/training_curve.png")
+
 plt.show()

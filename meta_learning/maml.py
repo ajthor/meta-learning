@@ -42,7 +42,6 @@ def adapt_model(
             loss,
             params.values(),
             create_graph=True,  # Important for MAML second-order gradients
-            retain_graph=True,
         )
 
         # Update parameters functionally (maintains computational graph)
@@ -80,7 +79,7 @@ def meta_update_step(
         Average meta loss across the batch
     """
     meta_optimizer.zero_grad()
-    
+
     # Get batch size from first tensor
     batch_size = query_data[0].shape[0]
     meta_losses = []
@@ -90,9 +89,11 @@ def meta_update_step(
         # Extract single task data
         task_example_data = tuple(tensor[i] for tensor in example_data)
         task_query_data = tuple(tensor[i] for tensor in query_data)
-        
+
         # Adapt to current task
-        adapted_model = adapt_model(model, task_example_data, loss_fn, inner_lr, inner_steps)
+        adapted_model = adapt_model(
+            model, task_example_data, loss_fn, inner_lr, inner_steps
+        )
 
         # Compute meta loss on query set using adapted model
         meta_loss = loss_fn(adapted_model, task_query_data)
