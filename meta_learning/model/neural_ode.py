@@ -33,6 +33,17 @@ class ODEFunc(torch.nn.Module):
         Returns:
             torch.Tensor: The time derivative dx/dt at the current state
         """
+        # Ensure t has the same batch dimension as x
+        # Debug: print shapes
+        # print(f"Debug ODEFunc: t.shape={t.shape}, x.shape={x.shape}")
+        
+        if t.dim() == 0:  # scalar
+            t = t.expand(x.shape[0])
+        elif t.dim() == 1 and t.shape[0] == 1:  # [dt] -> [dt, dt, ...]
+            t = t.expand(x.shape[0])
+        
+        # print(f"Debug ODEFunc after expand: t.shape={t.shape}, t.unsqueeze(-1).shape={t.unsqueeze(-1).shape}")
+        
         tx = torch.cat([t.unsqueeze(-1), x], dim=-1)  # Concatenate time and state
         return self.model(tx)
 
