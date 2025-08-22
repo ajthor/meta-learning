@@ -30,12 +30,13 @@ def adapt_model(
             params.values(),
             create_graph=False,  # First-order only
             retain_graph=False,
+            allow_unused=True,   # Allow some parameters to not be used
         )
 
         # No torch.no_grad(): keep identity path from fast-params to base params
         # Detach only the gradient term to ignore Hessian contributions
         params = OrderedDict(
-            (name, p - inner_lr * g.detach())
+            (name, p - inner_lr * g.detach() if g is not None else p)
             for (name, p), g in zip(params.items(), grads)
         )
 

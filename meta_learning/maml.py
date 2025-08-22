@@ -42,12 +42,13 @@ def adapt_model(
             loss,
             params.values(),
             create_graph=True,  # Important for MAML second-order gradients
+            allow_unused=True,  # Allow some parameters to not be used
         )
 
         # Update parameters functionally (maintains computational graph)
         params = OrderedDict(
             {
-                name: param - inner_lr * grad
+                name: param - inner_lr * grad if grad is not None else param
                 for (name, param), grad in zip(params.items(), grads)
             }
         )
