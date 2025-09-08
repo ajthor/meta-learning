@@ -17,10 +17,15 @@ def adapt_model(
     second-order (Hessian) terms while preserving first-order dependence on
     the base parameters.
     """
-    params = OrderedDict(model.named_parameters())
+    # Extract base model if we have nested AdaptedParameterModels
+    base_model = model
+    while isinstance(base_model, AdaptedParameterModel):
+        base_model = base_model.base_model
+    
+    params = OrderedDict(base_model.named_parameters())
 
     for _ in range(inner_steps):
-        adapted_model = AdaptedParameterModel(model, params)
+        adapted_model = AdaptedParameterModel(base_model, params)
         loss = loss_fn(adapted_model, example_data)
         if not torch.isfinite(loss):
             raise ValueError(f"Non-finite loss detected: {loss.item()}")
@@ -40,7 +45,7 @@ def adapt_model(
             for (name, p), g in zip(params.items(), grads)
         )
 
-    return AdaptedParameterModel(model, params)
+    return AdaptedParameterModel(base_model, params)
 
 
 def meta_update_step(

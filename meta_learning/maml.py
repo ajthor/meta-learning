@@ -23,12 +23,17 @@ def adapt_model(
     Returns:
         AdaptedParameterModel with updated parameters
     """
-    # Get initial parameters as OrderedDict
-    params = OrderedDict(model.named_parameters())
+    # Extract base model if we have nested AdaptedParameterModels
+    base_model = model
+    while isinstance(base_model, AdaptedParameterModel):
+        base_model = base_model.base_model
+    
+    # Get initial parameters as OrderedDict from the base model
+    params = OrderedDict(base_model.named_parameters())
 
     for _ in range(inner_steps):
-        # Create adapted model for current parameters
-        adapted_model = AdaptedParameterModel(model, params)
+        # Create adapted model for current parameters using base model
+        adapted_model = AdaptedParameterModel(base_model, params)
 
         # Compute loss using adapted model
         loss = loss_fn(adapted_model, example_data)
@@ -53,7 +58,7 @@ def adapt_model(
             }
         )
 
-    return AdaptedParameterModel(model, params)
+    return AdaptedParameterModel(base_model, params)
 
 
 def meta_update_step(
